@@ -1,0 +1,37 @@
+version: "3.8"
+
+services:
+  flight-monitor:
+    build: .
+    container_name: flight-monitor
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - TZ=America/Vancouver
+    volumes:
+      - flight-data:/app/data
+      - flight-logs:/app/logs
+    ports:
+      - "8080:8080"
+    command: ["python", "main.py"]
+
+  dashboard:
+    build: .
+    container_name: flight-dashboard
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - TZ=America/Vancouver
+    volumes:
+      - flight-data:/app/data
+    ports:
+      - "8080:8080"
+    command: ["python", "main.py", "--dashboard"]
+    profiles:
+      - dashboard-only
+
+volumes:
+  flight-data:
+    driver: local
+  flight-logs:
+    driver: local

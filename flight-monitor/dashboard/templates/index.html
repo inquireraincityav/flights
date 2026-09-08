@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YVR → BOM Flight Monitor</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --surface: #1e293b;
+            --surface-hover: #334155;
+            --text: #f1f5f9;
+            --text-muted: #94a3b8;
+            --accent: #3b82f6;
+            --green: #22c55e;
+            --red: #ef4444;
+            --yellow: #eab308;
+            --purple: #a855f7;
+            --border: #334155;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        header { text-align: center; padding: 30px 0; border-bottom: 1px solid var(--border); margin-bottom: 30px; }
+        header h1 { font-size: 2em; margin-bottom: 5px; }
+        header p { color: var(--text-muted); }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 30px; }
+        .stat-card { background: var(--surface); border-radius: 12px; padding: 20px; text-align: center; }
+        .stat-card .label { font-size: 0.8em; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; }
+        .stat-card .value { font-size: 1.8em; font-weight: 700; margin-top: 5px; }
+        .stat-card .sub { font-size: 0.85em; color: var(--text-muted); margin-top: 4px; }
+        .price-green { color: var(--green); }
+        .price-red { color: var(--red); }
+        .price-yellow { color: var(--yellow); }
+        .price-purple { color: var(--purple); }
+        .section { margin-bottom: 30px; }
+        .section h2 { font-size: 1.3em; margin-bottom: 15px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+        .matrix { overflow-x: auto; }
+        .matrix table { width: 100%; border-collapse: collapse; }
+        .matrix th, .matrix td { padding: 12px; text-align: center; border: 1px solid var(--border); }
+        .matrix th { background: var(--surface); color: var(--text-muted); font-size: 0.85em; }
+        .matrix td { background: var(--surface); cursor: pointer; transition: background 0.2s; }
+        .matrix td:hover { background: var(--surface-hover); }
+        .matrix .cell-price { font-weight: 700; font-size: 1.1em; }
+        .matrix .cell-airline { font-size: 0.75em; color: var(--text-muted); }
+        .tier-insane { color: #ff6b35; }
+        .tier-excellent { color: var(--purple); }
+        .tier-great { color: var(--green); }
+        .tier-good { color: var(--accent); }
+        .flights-list { display: grid; gap: 12px; }
+        .flight-card { background: var(--surface); border-radius: 10px; padding: 16px; display: grid; grid-template-columns: 1fr 1fr auto; gap: 16px; align-items: center; }
+        .flight-card:hover { background: var(--surface-hover); }
+        .flight-info h3 { font-size: 1.1em; margin-bottom: 4px; }
+        .flight-info .route { color: var(--text-muted); font-size: 0.9em; }
+        .flight-meta { font-size: 0.85em; color: var(--text-muted); }
+        .flight-price { text-align: right; }
+        .flight-price .amount { font-size: 1.4em; font-weight: 700; }
+        .flight-price .provider { font-size: 0.8em; color: var(--text-muted); }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75em; font-weight: 600; }
+        .badge-verified { background: rgba(34, 197, 94, 0.2); color: var(--green); }
+        .badge-likely { background: rgba(234, 179, 8, 0.2); color: var(--yellow); }
+        .badge-unverified { background: rgba(239, 68, 68, 0.2); color: var(--red); }
+        .badge-direct { background: rgba(59, 130, 246, 0.2); color: var(--accent); }
+        .badge-warning { background: rgba(239, 68, 68, 0.15); color: var(--red); }
+        .badge-bag { background: rgba(34, 197, 94, 0.15); color: var(--green); }
+        .filters { background: var(--surface); border-radius: 10px; padding: 16px; margin-bottom: 20px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+        .filters select, .filters input { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; font-size: 0.9em; }
+        .filters label { font-size: 0.85em; color: var(--text-muted); }
+        .btn { background: var(--accent); color: white; border: none; border-radius: 6px; padding: 8px 16px; cursor: pointer; font-size: 0.9em; }
+        .btn:hover { opacity: 0.9; }
+        .providers-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; }
+        .provider-card { background: var(--surface); border-radius: 8px; padding: 14px; display: flex; align-items: center; gap: 10px; }
+        .provider-status { width: 10px; height: 10px; border-radius: 50%; }
+        .provider-status.ok { background: var(--green); }
+        .provider-status.fail { background: var(--red); }
+        .tabs { display: flex; gap: 0; margin-bottom: 20px; border-bottom: 2px solid var(--border); }
+        .tab { padding: 10px 20px; cursor: pointer; color: var(--text-muted); border-bottom: 2px solid transparent; margin-bottom: -2px; }
+        .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .loading { text-align: center; padding: 40px; color: var(--text-muted); }
+        #chart-container { background: var(--surface); border-radius: 10px; padding: 20px; height: 300px; }
+        @media (max-width: 768px) {
+            .flight-card { grid-template-columns: 1fr; }
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>✈️ YVR → BOM</h1>
+            <p id="header-dates">Dec 11–15, 2026 → Jan 3–5, 2027</p>
+            <p id="last-update" style="margin-top: 5px; font-size: 0.85em; color: var(--text-muted);"></p>
+        </header>
+
+        <div class="stats-grid" id="stats-grid">
+            <div class="stat-card"><div class="label">Best Price</div><div class="value" id="stat-best">—</div><div class="sub" id="stat-best-detail"></div></div>
+            <div class="stat-card"><div class="label">Best Value</div><div class="value" id="stat-value">—</div><div class="sub" id="stat-value-detail"></div></div>
+            <div class="stat-card"><div class="label">Best Direct</div><div class="value" id="stat-direct">—</div><div class="sub" id="stat-direct-detail"></div></div>
+            <div class="stat-card"><div class="label">Historical Low</div><div class="value" id="stat-low">—</div><div class="sub" id="stat-low-detail"></div></div>
+            <div class="stat-card"><div class="label">7-Day Low</div><div class="value" id="stat-7d">—</div></div>
+            <div class="stat-card"><div class="label">Total Offers</div><div class="value" id="stat-total">—</div></div>
+        </div>
+
+        <div class="tabs">
+            <div class="tab active" data-tab="matrix">Date Matrix</div>
+            <div class="tab" data-tab="flights">All Flights</div>
+            <div class="tab" data-tab="history">Price History</div>
+            <div class="tab" data-tab="providers">Providers</div>
+        </div>
+
+        <div class="tab-content active" id="tab-matrix">
+            <div class="section">
+                <h2>Cheapest Baggage-Inclusive Fare per Date Combination</h2>
+                <div class="matrix" id="date-matrix"><div class="loading">Loading...</div></div>
+            </div>
+        </div>
+
+        <div class="tab-content" id="tab-flights">
+            <div class="filters">
+                <div><label>Sort by</label><select id="sort-by"><option value="price">Price</option><option value="score">Deal Score</option><option value="duration">Duration</option><option value="stops">Stops</option></select></div>
+                <div><label>Max Price</label><input type="number" id="max-price" placeholder="e.g. 2600" style="width:100px"></div>
+                <div><label>Max Stops</label><select id="max-stops"><option value="">Any</option><option value="0">Nonstop</option><option value="1">1 stop</option><option value="2">2 stops</option></select></div>
+                <div><label><input type="checkbox" id="baggage-only" checked> Baggage included</label></div>
+                <div><label><input type="checkbox" id="direct-only"> Airline direct</label></div>
+                <div><label><input type="checkbox" id="verified-only"> Verified only</label></div>
+                <div><label><input type="checkbox" id="no-self-transfer" checked> No self-transfer</label></div>
+                <button class="btn" onclick="loadFlights()">Apply</button>
+            </div>
+            <div class="flights-list" id="flights-list"><div class="loading">Loading...</div></div>
+        </div>
+
+        <div class="tab-content" id="tab-history">
+            <div class="section">
+                <div style="margin-bottom: 15px; display: flex; gap: 10px;">
+                    <select id="history-days"><option value="1">24 hours</option><option value="3">3 days</option><option value="7" selected>7 days</option><option value="30">30 days</option><option value="365">All</option></select>
+                    <button class="btn" onclick="loadHistory()">Update</button>
+                </div>
+                <div id="chart-container"><div class="loading">Price history will appear here after the first scan.</div></div>
+            </div>
+        </div>
+
+        <div class="tab-content" id="tab-providers">
+            <div class="section">
+                <h2>Provider Health</h2>
+                <div class="providers-grid" id="providers-grid"><div class="loading">Loading...</div></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Tab switching
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                tab.classList.add('active');
+                document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+            });
+        });
+
+        function fmt(n) { return n ? '$' + n.toLocaleString('en-CA', {maximumFractionDigits: 0}) : '—'; }
+        function tierClass(tier) {
+            const map = {INSANE: 'tier-insane', EXCELLENT: 'tier-excellent', GREAT: 'tier-great', GOOD: 'tier-good'};
+            return map[tier] || '';
+        }
+        function verifBadge(v) {
+            const map = {VERIFIED: 'badge-verified', LIKELY: 'badge-likely', UNVERIFIED: 'badge-unverified'};
+            return `<span class="badge ${map[v] || 'badge-unverified'}">${v || 'UNVERIFIED'}</span>`;
+        }
+
+        async function loadSummary() {
+            try {
+                const r = await fetch('/api/summary');
+                const d = await r.json();
+                if (d.cheapest) {
+                    document.getElementById('stat-best').innerHTML = `<span class="price-green">${fmt(d.cheapest.price)}</span>`;
+                    document.getElementById('stat-best-detail').textContent = `${d.cheapest.airline} • ${d.cheapest.departure_date}`;
+                }
+                if (d.best_value) {
+                    document.getElementById('stat-value').innerHTML = `<span class="price-purple">${fmt(d.best_value.price)}</span>`;
+                    document.getElementById('stat-value-detail').textContent = d.best_value.airline || '';
+                }
+                if (d.best_direct) {
+                    document.getElementById('stat-direct').innerHTML = fmt(d.best_direct.price);
+                    document.getElementById('stat-direct-detail').textContent = d.best_direct.airline || '';
+                }
+                document.getElementById('stat-low').innerHTML = fmt(d.historical_low);
+                document.getElementById('stat-7d').innerHTML = fmt(d.seven_day_low);
+                document.getElementById('stat-total').textContent = d.total_offers || 0;
+            } catch(e) { console.error('Summary load error:', e); }
+        }
+
+        async function loadMatrix() {
+            try {
+                const r = await fetch('/api/matrix');
+                const d = await r.json();
+                const matrix = d.matrix || [];
+
+                const deps = [...new Set(matrix.map(m => m.departure_date))].sort();
+                const rets = [...new Set(matrix.map(m => m.return_date))].sort();
+
+                let html = '<table><thead><tr><th></th>';
+                rets.forEach(r => { html += `<th>${r.slice(5)}</th>`; });
+                html += '</tr></thead><tbody>';
+
+                deps.forEach(dep => {
+                    html += `<tr><th>${dep.slice(5)}</th>`;
+                    rets.forEach(ret => {
+                        const cell = matrix.find(m => m.departure_date === dep && m.return_date === ret);
+                        if (cell && cell.min_price) {
+                            html += `<td onclick="filterByDates('${dep}','${ret}')"><div class="cell-price">${fmt(cell.min_price)}</div><div class="cell-airline">${cell.airline || ''}</div></td>`;
+                        } else {
+                            html += '<td><div class="cell-price" style="color:var(--text-muted)">—</div></td>';
+                        }
+                    });
+                    html += '</tr>';
+                });
+                html += '</tbody></table>';
+                document.getElementById('date-matrix').innerHTML = html;
+            } catch(e) {
+                document.getElementById('date-matrix').innerHTML = '<div class="loading">No data yet — run a scan first.</div>';
+            }
+        }
+
+        function filterByDates(dep, ret) {
+            document.querySelectorAll('.tab')[1].click();
+            loadFlights(dep, ret);
+        }
+
+        async function loadFlights(dep, ret) {
+            const params = new URLSearchParams();
+            params.set('sort_by', document.getElementById('sort-by').value);
+            if (dep) params.set('departure_date', dep);
+            if (ret) params.set('return_date', ret);
+            const mp = document.getElementById('max-price').value;
+            if (mp) params.set('max_price', mp);
+            const ms = document.getElementById('max-stops').value;
+            if (ms !== '') params.set('max_stops', ms);
+            if (document.getElementById('baggage-only').checked) params.set('baggage_included', 'true');
+            if (document.getElementById('direct-only').checked) params.set('airline_direct', 'true');
+            if (document.getElementById('verified-only').checked) params.set('verified_only', 'true');
+            if (document.getElementById('no-self-transfer').checked) params.set('exclude_self_transfer', 'true');
+            params.set('limit', '50');
+
+            try {
+                const r = await fetch('/api/flights?' + params);
+                const d = await r.json();
+                const list = document.getElementById('flights-list');
+                if (!d.flights || d.flights.length === 0) {
+                    list.innerHTML = '<div class="loading">No flights found. Run a scan first or adjust filters.</div>';
+                    return;
+                }
+                let html = '';
+                d.flights.forEach(f => {
+                    const bags = f.baggage_status === 'VERIFIED_INCLUDED' ? '<span class="badge badge-bag">✅ Bag included</span>' :
+                                 f.baggage_status === 'VERIFIED_EXTRA_COST' ? `<span class="badge badge-bag">🧳 +$${f.baggage_cost || 0}</span>` : '';
+                    const direct = f.is_airline_direct ? '<span class="badge badge-direct">Direct booking</span>' : '';
+                    const warnings = [];
+                    if (f.self_transfer) warnings.push('<span class="badge badge-warning">⚠️ Self-transfer</span>');
+                    if (f.airport_change) warnings.push('<span class="badge badge-warning">⚠️ Airport change</span>');
+
+                    html += `
+                    <div class="flight-card">
+                        <div class="flight-info">
+                            <h3>${f.airline || 'Unknown'} ${direct}</h3>
+                            <div class="route">${f.departure_date} → ${f.return_date}</div>
+                            <div class="route">${f.outbound_stops || 0} stop(s) outbound • ${f.return_stops || 0} stop(s) return</div>
+                            <div style="margin-top:5px">${bags} ${verifBadge(f.verification_level)} ${warnings.join(' ')}</div>
+                        </div>
+                        <div class="flight-meta">
+                            <div>Score: <strong>${f.deal_score ? f.deal_score.toFixed(0) : '—'}/100</strong></div>
+                            <div>Provider: ${f.booking_provider || '—'}</div>
+                            ${f.fare_brand ? '<div>Fare: ' + f.fare_brand + '</div>' : ''}
+                        </div>
+                        <div class="flight-price">
+                            <div class="amount ${tierClass(f.deal_tier)}">${fmt(f.cad_total)}</div>
+                            <div class="provider">CAD total w/ bag</div>
+                            ${f.booking_url ? '<a href="' + f.booking_url + '" target="_blank" class="btn" style="margin-top:8px;display:inline-block;font-size:0.8em;">View / Book</a>' : ''}
+                        </div>
+                    </div>`;
+                });
+                list.innerHTML = html;
+            } catch(e) { document.getElementById('flights-list').innerHTML = '<div class="loading">Error loading flights.</div>'; }
+        }
+
+        async function loadHistory() {
+            const days = document.getElementById('history-days').value;
+            try {
+                const r = await fetch(`/api/price-history?days=${days}`);
+                const d = await r.json();
+                const container = document.getElementById('chart-container');
+                if (!d.history || d.history.length === 0) {
+                    container.innerHTML = '<div class="loading">No history data yet.</div>';
+                    return;
+                }
+                // Simple text-based history display
+                let html = '<div style="overflow-y:auto;max-height:280px;">';
+                const grouped = {};
+                d.history.forEach(h => {
+                    const date = h.recorded_at.slice(0, 10);
+                    if (!grouped[date] || h.price < grouped[date].price) {
+                        grouped[date] = h;
+                    }
+                });
+                html += '<table style="width:100%;"><thead><tr><th style="text-align:left">Date</th><th>Lowest</th><th>Airline</th><th>Provider</th></tr></thead><tbody>';
+                Object.entries(grouped).sort().forEach(([date, h]) => {
+                    html += `<tr><td>${date}</td><td style="text-align:center;font-weight:700">${fmt(h.price)}</td><td style="text-align:center">${h.airline || '—'}</td><td style="text-align:center">${h.provider || '—'}</td></tr>`;
+                });
+                html += '</tbody></table></div>';
+                container.innerHTML = html;
+            } catch(e) { document.getElementById('chart-container').innerHTML = '<div class="loading">Error loading history.</div>'; }
+        }
+
+        async function loadProviders() {
+            try {
+                const r = await fetch('/api/providers');
+                const d = await r.json();
+                const grid = document.getElementById('providers-grid');
+                if (!d.providers || d.providers.length === 0) {
+                    grid.innerHTML = '<div class="loading">No provider data yet.</div>';
+                    return;
+                }
+                let html = '';
+                d.providers.forEach(p => {
+                    const ok = p.status === 'success';
+                    html += `
+                    <div class="provider-card">
+                        <div class="provider-status ${ok ? 'ok' : 'fail'}"></div>
+                        <div>
+                            <strong>${p.provider}</strong>
+                            <div style="font-size:0.8em;color:var(--text-muted)">${ok ? '✅ Success' : '⚠️ ' + (p.error || 'Failed')}</div>
+                            <div style="font-size:0.75em;color:var(--text-muted)">Last: ${p.checked_at || 'Never'} • ${p.results_count || 0} results • ${p.response_time_ms || 0}ms</div>
+                        </div>
+                    </div>`;
+                });
+                grid.innerHTML = html;
+            } catch(e) { document.getElementById('providers-grid').innerHTML = '<div class="loading">Error loading providers.</div>'; }
+        }
+
+        // Initial load
+        loadSummary();
+        loadMatrix();
+        loadFlights();
+        loadProviders();
+
+        // Auto-refresh every 60s
+        setInterval(() => { loadSummary(); loadMatrix(); loadProviders(); }, 60000);
+    </script>
+</body>
+</html>
