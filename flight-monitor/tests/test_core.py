@@ -544,6 +544,146 @@ class TestConfig:
         from config import get_date_combinations
         assert len(get_date_combinations()) == 15
 
+    def test_scoring_weights_sum_to_one(self):
+        from config import (
+            SCORE_WEIGHT_PRICE, SCORE_WEIGHT_STOPS, SCORE_WEIGHT_DURATION,
+            SCORE_WEIGHT_BAGGAGE, SCORE_WEIGHT_DIRECT_BOOKING,
+            SCORE_WEIGHT_CONFIDENCE, SCORE_WEIGHT_CONNECTION,
+        )
+        total = (
+            SCORE_WEIGHT_PRICE + SCORE_WEIGHT_STOPS + SCORE_WEIGHT_DURATION
+            + SCORE_WEIGHT_BAGGAGE + SCORE_WEIGHT_DIRECT_BOOKING
+            + SCORE_WEIGHT_CONFIDENCE + SCORE_WEIGHT_CONNECTION
+        )
+        assert abs(total - 1.0) < 0.001
+
+    def test_price_weight_dominant(self):
+        from config import SCORE_WEIGHT_PRICE
+        assert SCORE_WEIGHT_PRICE >= 0.5
+
+    def test_max_stops_allows_indirect(self):
+        from config import MAX_STOPS
+        assert MAX_STOPS >= 3
+
+    def test_prefer_cheapest_over_fastest(self):
+        from config import PREFER_CHEAPEST_OVER_FASTEST
+        assert PREFER_CHEAPEST_OVER_FASTEST is True
+
+
+# --- Provider Registration ---
+
+class TestProviderRegistration:
+    def test_17_providers_registered(self):
+        from main import create_monitor
+        monitor = create_monitor()
+        assert len(monitor.providers) == 17
+
+    def test_all_provider_names(self):
+        from main import create_monitor
+        monitor = create_monitor()
+        expected = {
+            "google_flights", "skyscanner", "cheapoair",
+            "kayak", "expedia", "flighthub",
+            "air_canada", "air_india", "cathay_pacific",
+            "emirates", "qatar_airways", "lufthansa",
+            "british_airways", "turkish_airlines", "klm",
+            "air_france", "singapore_airlines",
+        }
+        assert set(monitor.providers.keys()) == expected
+
+    def test_airline_direct_providers(self):
+        from main import create_monitor
+        monitor = create_monitor()
+        direct_providers = {
+            name for name, p in monitor.providers.items()
+            if p.is_airline_direct
+        }
+        expected_direct = {
+            "air_canada", "air_india", "cathay_pacific",
+            "emirates", "qatar_airways", "lufthansa",
+            "british_airways", "turkish_airlines", "klm",
+            "air_france", "singapore_airlines",
+        }
+        assert direct_providers == expected_direct
+
+    def test_aggregator_providers(self):
+        from main import create_monitor
+        monitor = create_monitor()
+        aggregators = {
+            name for name, p in monitor.providers.items()
+            if not p.is_airline_direct
+        }
+        expected_agg = {
+            "google_flights", "skyscanner", "cheapoair",
+            "kayak", "expedia", "flighthub",
+        }
+        assert aggregators == expected_agg
+
+
+# --- New Airline Baggage ---
+
+class TestNewAirlineBaggage:
+    def test_emirates_bags_included(self):
+        from providers.base import FlightOffer
+        from services.baggage import evaluate_baggage
+
+        offer = FlightOffer(
+            airline="Emirates", total_price=2200,
+            total_with_baggage=2200, original_currency="CAD", cad_total=2200,
+        )
+        offer = evaluate_baggage(offer)
+        assert offer.baggage_status == "VERIFIED_INCLUDED"
+        assert offer.checked_bags_included == 1
+        assert offer.baggage_weight_kg == 30
+
+    def test_qatar_bags_included(self):
+        from providers.base import FlightOffer
+        from services.baggage import evaluate_baggage
+
+        offer = FlightOffer(
+            airline="Qatar Airways", total_price=2100,
+            total_with_baggage=2100, original_currency="CAD", cad_total=2100,
+        )
+        offer = evaluate_baggage(offer)
+        assert offer.baggage_status == "VERIFIED_INCLUDED"
+        assert offer.baggage_weight_kg == 30
+
+    def test_turkish_bags_included(self):
+        from providers.base import FlightOffer
+        from services.baggage import evaluate_baggage
+
+        offer = FlightOffer(
+            airline="Turkish Airlines", total_price=2000,
+            total_with_baggage=2000, original_currency="CAD", cad_total=2000,
+        )
+        offer = evaluate_baggage(offer)
+        assert offer.baggage_status == "VERIFIED_INCLUDED"
+        assert offer.baggage_weight_kg == 30
+
+    def test_lufthansa_bags_included(self):
+        from providers.base import FlightOffer
+        from services.baggage import evaluate_baggage
+
+        offer = FlightOffer(
+            airline="Lufthansa", total_price=2300,
+            total_with_baggage=2300, original_currency="CAD", cad_total=2300,
+        )
+        offer = evaluate_baggage(offer)
+        assert offer.baggage_status == "VERIFIED_INCLUDED"
+        assert offer.baggage_weight_kg == 23
+
+    def test_singapore_airlines_bags_included(self):
+        from providers.base import FlightOffer
+        from services.baggage import evaluate_baggage
+
+        offer = FlightOffer(
+            airline="Singapore Airlines", total_price=2400,
+            total_with_baggage=2400, original_currency="CAD", cad_total=2400,
+        )
+        offer = evaluate_baggage(offer)
+        assert offer.baggage_status == "VERIFIED_INCLUDED"
+        assert offer.baggage_weight_kg == 30
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

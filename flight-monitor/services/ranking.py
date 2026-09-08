@@ -36,30 +36,30 @@ def calculate_deal_score(offer: FlightOffer) -> float:
     else:
         price_score = max(0, 40 - ((price - MAX_TARGET_PRICE_CAD) / 500) * 40)
 
-    # Stops score
+    # Stops score — lenient; user is comfortable with indirect flights
     total_stops = (offer.outbound.stops if offer.outbound else 0) + (offer.inbound.stops if offer.inbound else 0)
     if total_stops == 0:
         stops_score = 100
     elif total_stops <= 2:
-        stops_score = 80
+        stops_score = 90
     elif total_stops <= 4:
-        stops_score = 50
+        stops_score = 75
+    elif total_stops <= 6:
+        stops_score = 60
     else:
-        stops_score = 20
+        stops_score = 45
 
-    # Duration score
+    # Duration score — very lenient; user accepts long layovers for cheaper fares
     max_dur_min = MAX_PREFERRED_DURATION_HOURS * 60
     out_dur = offer.outbound.total_duration_minutes if offer.outbound else 0
     ret_dur = offer.inbound.total_duration_minutes if offer.inbound else 0
     avg_dur = ((out_dur or 0) + (ret_dur or 0)) / 2 if (out_dur or ret_dur) else 0
     if avg_dur <= 0:
-        duration_score = 50
-    elif avg_dur <= max_dur_min * 0.6:
-        duration_score = 100
+        duration_score = 70
     elif avg_dur <= max_dur_min:
-        duration_score = 100 - ((avg_dur - max_dur_min * 0.6) / (max_dur_min * 0.4)) * 50
+        duration_score = 90
     else:
-        duration_score = max(0, 50 - ((avg_dur - max_dur_min) / max_dur_min) * 50)
+        duration_score = max(50, 90 - ((avg_dur - max_dur_min) / max_dur_min) * 30)
 
     # Baggage score
     if offer.baggage_status == "VERIFIED_INCLUDED":

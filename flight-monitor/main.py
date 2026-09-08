@@ -56,16 +56,38 @@ def create_monitor() -> FlightMonitor:
     from providers.google_flights import GoogleFlightsProvider
     from providers.skyscanner import SkyscannerProvider
     from providers.cheapoair import CheapOairProvider
+    from providers.kayak import KayakProvider
+    from providers.expedia import ExpediaProvider
+    from providers.flighthub import FlightHubProvider
     from providers.air_canada import AirCanadaProvider
     from providers.air_india import AirIndiaProvider
     from providers.cathay_pacific import CathayPacificProvider
+    from providers.emirates import EmiratesProvider
+    from providers.qatar_airways import QatarAirwaysProvider
+    from providers.lufthansa import LufthansaProvider
+    from providers.british_airways import BritishAirwaysProvider
+    from providers.turkish_airlines import TurkishAirlinesProvider
+    from providers.klm import KLMProvider
+    from providers.air_france import AirFranceProvider
+    from providers.singapore_airlines import SingaporeAirlinesProvider
 
     monitor.register_provider(GoogleFlightsProvider())
     monitor.register_provider(SkyscannerProvider())
     monitor.register_provider(CheapOairProvider())
+    monitor.register_provider(KayakProvider())
+    monitor.register_provider(ExpediaProvider())
+    monitor.register_provider(FlightHubProvider())
     monitor.register_provider(AirCanadaProvider())
     monitor.register_provider(AirIndiaProvider())
     monitor.register_provider(CathayPacificProvider())
+    monitor.register_provider(EmiratesProvider())
+    monitor.register_provider(QatarAirwaysProvider())
+    monitor.register_provider(LufthansaProvider())
+    monitor.register_provider(BritishAirwaysProvider())
+    monitor.register_provider(TurkishAirlinesProvider())
+    monitor.register_provider(KLMProvider())
+    monitor.register_provider(AirFranceProvider())
+    monitor.register_provider(SingaporeAirlinesProvider())
 
     return monitor
 
@@ -130,10 +152,25 @@ async def run_test_provider(provider_name: str):
         "google_flights": "providers.google_flights.GoogleFlightsProvider",
         "skyscanner": "providers.skyscanner.SkyscannerProvider",
         "cheapoair": "providers.cheapoair.CheapOairProvider",
+        "kayak": "providers.kayak.KayakProvider",
+        "expedia": "providers.expedia.ExpediaProvider",
+        "flighthub": "providers.flighthub.FlightHubProvider",
         "air_canada": "providers.air_canada.AirCanadaProvider",
         "air_india": "providers.air_india.AirIndiaProvider",
         "cathay": "providers.cathay_pacific.CathayPacificProvider",
         "cathay_pacific": "providers.cathay_pacific.CathayPacificProvider",
+        "emirates": "providers.emirates.EmiratesProvider",
+        "qatar": "providers.qatar_airways.QatarAirwaysProvider",
+        "qatar_airways": "providers.qatar_airways.QatarAirwaysProvider",
+        "lufthansa": "providers.lufthansa.LufthansaProvider",
+        "british_airways": "providers.british_airways.BritishAirwaysProvider",
+        "ba": "providers.british_airways.BritishAirwaysProvider",
+        "turkish": "providers.turkish_airlines.TurkishAirlinesProvider",
+        "turkish_airlines": "providers.turkish_airlines.TurkishAirlinesProvider",
+        "klm": "providers.klm.KLMProvider",
+        "air_france": "providers.air_france.AirFranceProvider",
+        "singapore": "providers.singapore_airlines.SingaporeAirlinesProvider",
+        "singapore_airlines": "providers.singapore_airlines.SingaporeAirlinesProvider",
     }
 
     key = provider_name.lower().replace("-", "_").replace(" ", "_")

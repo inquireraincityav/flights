@@ -4,7 +4,7 @@ Automated flight price monitoring system for round-trip flights from Vancouver (
 
 ## What It Does
 
-- Monitors **6 flight sources**: Google Flights, Skyscanner, CheapOair, Air Canada, Air India, Cathay Pacific
+- Monitors **17 flight sources**: Google Flights, Skyscanner, CheapOair, Kayak, Expedia, FlightHub, Air Canada, Air India, Cathay Pacific, Emirates, Qatar Airways, Lufthansa, British Airways, Turkish Airlines, KLM, Air France, Singapore Airlines
 - Searches **15 date combinations** (Dec 11–15, 2026 → Jan 3–5, 2027)
 - Evaluates **baggage-inclusive pricing** (at least 1 checked bag required)
 - Compares **airline-direct vs. third-party** prices
@@ -90,11 +90,22 @@ You should receive a test message in Telegram.
 
 ```bash
 python main.py --test-provider google_flights
+python main.py --test-provider skyscanner
+python main.py --test-provider cheapoair
+python main.py --test-provider kayak
+python main.py --test-provider expedia
+python main.py --test-provider flighthub
 python main.py --test-provider air_canada
 python main.py --test-provider air_india
 python main.py --test-provider cathay_pacific
-python main.py --test-provider skyscanner
-python main.py --test-provider cheapoair
+python main.py --test-provider emirates
+python main.py --test-provider qatar_airways
+python main.py --test-provider lufthansa
+python main.py --test-provider british_airways
+python main.py --test-provider turkish_airlines
+python main.py --test-provider klm
+python main.py --test-provider air_france
+python main.py --test-provider singapore_airlines
 ```
 
 ### 8. Run First Scan
@@ -181,7 +192,7 @@ All settings are in `.env`. Key ones:
 | `MAX_TARGET_PRICE_CAD` | 2600 | Upper target price |
 | `CHECK_INTERVAL_HOURS` | 4 | Hours between scans |
 | `ALERT_COOLDOWN_HOURS` | 24 | Min hours between same alert |
-| `MAX_STOPS` | 2 | Maximum stops per direction |
+| `MAX_STOPS` | 3 | Maximum stops per direction |
 | `DIRECT_BOOKING_PREMIUM_CAD` | 100 | Premium threshold for preferring airline-direct |
 
 ## Deal Tiers
@@ -195,14 +206,32 @@ All settings are in `.env`. Key ones:
 
 ## Provider Limitations
 
+### Aggregators / OTAs
+
 | Provider | Method | Status | Notes |
 |----------|--------|--------|-------|
 | Google Flights | Playwright | Working | Best aggregator; page structure may change |
 | Skyscanner | Playwright | May be blocked | Anti-bot protections may prevent access |
 | CheapOair | Playwright | May be blocked | Anti-bot protections may prevent access |
-| Air Canada | Playwright | Working | Direct booking; no checked bag in basic economy |
-| Air India | Playwright | Working | Direct booking; 2×23kg bags included |
-| Cathay Pacific | Playwright | Working | Direct booking; 1×23kg bag included |
+| Kayak | Playwright | May be blocked | Strong anti-bot protections |
+| Expedia | Playwright | May be blocked | Anti-bot protections may prevent access |
+| FlightHub | Playwright | May be blocked | Canadian OTA; competitive on CA routes |
+
+### Airline Direct
+
+| Provider | Method | Status | Baggage | Hub |
+|----------|--------|--------|---------|-----|
+| Air Canada | Playwright | Working | $65/bag extra | YVR/YYZ |
+| Air India | Playwright | Working | 2×23kg included | DEL |
+| Cathay Pacific | Playwright | Working | 1×23kg included | HKG |
+| Emirates | Playwright | May be blocked | 1×30kg included | DXB |
+| Qatar Airways | Playwright | May be blocked | 1×30kg included | DOH |
+| Lufthansa | Playwright | May be blocked | 1×23kg included | FRA |
+| British Airways | Playwright | May be blocked | 1×23kg included | LHR |
+| Turkish Airlines | Playwright | May be blocked | 1×30kg included | IST |
+| KLM | Playwright | May be blocked | 1×23kg included | AMS |
+| Air France | Playwright | May be blocked | 1×23kg included | CDG |
+| Singapore Airlines | Playwright | May be blocked | 1×30kg included | SIN |
 
 All providers use Playwright browser automation. Airline websites may change their structure or block automated access. The system handles failures gracefully — a single provider failure never crashes the overall scan.
 
@@ -287,14 +316,25 @@ flight-monitor/
 ├── requirements.txt        # Python dependencies
 ├── Dockerfile              # Container build
 ├── docker-compose.yml      # Container orchestration
-├── providers/              # Flight search providers
+├── providers/              # Flight search providers (17 total)
 │   ├── base.py             # Base provider interface
-│   ├── google_flights.py   # Google Flights (Playwright)
-│   ├── skyscanner.py       # Skyscanner (Playwright)
-│   ├── cheapoair.py        # CheapOair (Playwright)
+│   ├── google_flights.py   # Google Flights (aggregator)
+│   ├── skyscanner.py       # Skyscanner (aggregator)
+│   ├── cheapoair.py        # CheapOair (OTA)
+│   ├── kayak.py            # Kayak (aggregator)
+│   ├── expedia.py          # Expedia (OTA)
+│   ├── flighthub.py        # FlightHub (OTA)
 │   ├── air_canada.py       # Air Canada direct
 │   ├── air_india.py        # Air India direct
-│   └── cathay_pacific.py   # Cathay Pacific direct
+│   ├── cathay_pacific.py   # Cathay Pacific direct
+│   ├── emirates.py         # Emirates direct
+│   ├── qatar_airways.py    # Qatar Airways direct
+│   ├── lufthansa.py        # Lufthansa direct
+│   ├── british_airways.py  # British Airways direct
+│   ├── turkish_airlines.py # Turkish Airlines direct
+│   ├── klm.py              # KLM direct
+│   ├── air_france.py       # Air France direct
+│   └── singapore_airlines.py # Singapore Airlines direct
 ├── database/               # SQLite persistence
 │   ├── models.py           # SQLAlchemy models
 │   └── database.py         # Session management & queries
