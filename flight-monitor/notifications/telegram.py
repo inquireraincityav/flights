@@ -371,6 +371,67 @@ async def send_status(status: dict) -> Optional[str]:
     return await send_message("\n".join(lines))
 
 
+async def send_scan_report(scan_result: dict) -> Optional[str]:
+    """Send a post-scan status report showing the system is live and top matches."""
+    now = format_local(now_local())
+    total = scan_result.get("total_offers", 0)
+    eligible = scan_result.get("eligible_offers", 0)
+    elapsed = scan_result.get("elapsed_seconds", 0)
+    providers = scan_result.get("providers", {})
+
+    ok_count = sum(1 for p in providers.values() if p.get("status") == "success")
+    fail_count = len(providers) - ok_count
+
+    lines = [
+        "<b>\U0001f4e1 FLIGHT MONITOR — LIVE</b>",
+        f"<i>{now}</i>",
+        "",
+        f"\U0001f50d <b>Scan Complete</b> ({elapsed:.0f}s)",
+        f"Providers: {ok_count} OK / {fail_count} failed",
+        f"Results: {total} found, {eligible} eligible",
+        "",
+    ]
+
+    top_offers = scan_result.get("top_offers", [])
+    if top_offers:
+        lines.append("\U0001f3af <b>CLOSEST TO YOUR BUDGET</b>")
+        lines.append(f"Target: $1,800 — $2,600 CAD")
+        lines.append("")
+        for i, o in enumerate(top_offers[:5], 1):
+            price = o.get("cad_total", 0)
+            tier = get_deal_tier(price)
+            emoji = get_deal_emoji(tier)
+            airline = o.get("airline", "Unknown")
+            dep = o.get("departure_date", "")
+            ret = o.get("return_date", "")
+            stops = o.get("outbound_stops", "?")
+            bag = "\U0001f9f3" if o.get("baggage_status") in ("VERIFIED_INCLUDED", "VERIFIED_EXTRA_COST") else "❓"
+            score = o.get("deal_score", 0)
+            lines.append(
+                f"{i}. {emoji} <b>${price:,.0f}</b> — {airline}"
+            )
+            lines.append(
+                f"   {dep} → {ret} • {stops} stop{'s' if stops != 1 else ''} • {bag} • Score: {score:.0f}"
+            )
+        lines.append("")
+    else:
+        lines.append("⚠️ No eligible offers found this scan.")
+        lines.append("Providers may be blocked or no results matched criteria.")
+        lines.append("")
+
+    # Provider status summary
+    lines.append("<b>Provider Status</b>")
+    for name, stats in sorted(providers.items()):
+        icon = "✅" if stats.get("status") == "success" else "❌"
+        count = stats.get("results", 0)
+        lines.append(f"{icon} {name}: {count} results")
+
+    lines.append("")
+    lines.append("\U0001f504 Next scan in ~1 hour")
+
+    return await send_message("\n".join(lines))
+
+
 async def handle_command(command: str) -> Optional[str]:
     """Handle incoming Telegram bot commands. Returns response text."""
     cmd = command.strip().lower()

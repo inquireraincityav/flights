@@ -36,6 +36,7 @@ from notifications.telegram import (
     send_deal_alert,
     send_historical_low_alert,
     send_price_drop_alert,
+    send_scan_report,
 )
 from providers.base import BaseProvider, BaggageStatus, FlightOffer
 from services.baggage import evaluate_baggage, is_baggage_eligible
@@ -155,12 +156,35 @@ class FlightMonitor:
         scan_elapsed = time.time() - scan_start
         logger.info("Full scan completed in %.1f seconds", scan_elapsed)
 
-        return {
+        # Build top offers sorted by price for scan report
+        top_sorted = sorted(eligible, key=lambda o: o.cad_total)[:5]
+        top_offers = []
+        for o in top_sorted:
+            top_offers.append({
+                "cad_total": o.cad_total,
+                "airline": o.airline,
+                "departure_date": o.departure_date,
+                "return_date": o.return_date,
+                "outbound_stops": o.outbound.stops if o.outbound else 0,
+                "baggage_status": o.baggage_status,
+                "deal_score": o.deal_score or 0,
+            })
+
+        result = {
             "total_offers": len(all_offers),
             "eligible_offers": len(eligible),
             "providers": provider_stats,
             "elapsed_seconds": round(scan_elapsed, 1),
+            "top_offers": top_offers,
         }
+
+        # Send scan status report to Telegram
+        try:
+            await send_scan_report(result)
+        except Exception as e:
+            logger.warning("Failed to send scan report: %s", e)
+
+        return result
 
     def _is_eligible(self, offer: FlightOffer) -> bool:
         """Check if an offer meets basic eligibility criteria."""
