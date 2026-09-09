@@ -432,19 +432,105 @@ async def send_scan_report(scan_result: dict) -> Optional[str]:
     return await send_message("\n".join(lines))
 
 
+_last_scan_result: Optional[dict] = None
+_last_scan_time: Optional[str] = None
+_update_offset: int = 0
+
+
+def store_last_scan(scan_result: dict):
+    """Store the last scan result for /status replies."""
+    global _last_scan_result, _last_scan_time
+    _last_scan_result = scan_result
+    _last_scan_time = format_local(now_local())
+
+
 async def handle_command(command: str) -> Optional[str]:
     """Handle incoming Telegram bot commands. Returns response text."""
     cmd = command.strip().lower()
-    if cmd == "/help":
+
+    if cmd == "/help" or cmd == "/start":
         return (
             "<b>Flight Monitor Commands</b>\n\n"
-            "/status - Monitoring status\n"
-            "/best - Current best flights\n"
-            "/today - Today's best fares\n"
-            "/dates - Cheapest per date combo\n"
-            "/direct - Best airline-direct fares\n"
-            "/history - Historical lowest\n"
-            "/check - Trigger immediate scan\n"
-            "/help - This message"
+            "/status — Is the monitor running? Last scan results\n"
+            "/help — This message"
         )
+
+    if cmd == "/status":
+        if _last_scan_result is None:
+            return (
+                "<b>\U0001f4e1 FLIGHT MONITOR</b>\n\n"
+                "No scan has completed yet.\n"
+                "The monitor is running — first results will appear after the initial scan finishes."
+            )
+
+        lines = [
+            "<b>\U0001f4e1 FLIGHT MONITOR — LIVE</b>",
+            f"<i>Last scan: {_last_scan_time}</i>",
+            "",
+        ]
+
+        total = _last_scan_result.get("total_offers", 0)
+        eligible = _last_scan_result.get("eligible_offers", 0)
+        elapsed = _last_scan_result.get("elapsed_seconds", 0)
+        providers = _last_scan_result.get("providers", {})
+        ok_count = sum(1 for p in providers.values() if p.get("status") == "success")
+
+        lines.append(f"Providers: {ok_count}/{len(providers)} OK")
+        lines.append(f"Results: {total} found, {eligible} eligible")
+        lines.append(f"Scan time: {elapsed:.0f}s")
+        lines.append("")
+
+        top_offers = _last_scan_result.get("top_offers", [])
+        if top_offers:
+            lines.append("\U0001f3af <b>TOP MATCHES</b>")
+            for i, o in enumerate(top_offers[:5], 1):
+                price = o.get("cad_total", 0)
+                emoji = get_deal_emoji(get_deal_tier(price))
+                airline = o.get("airline", "Unknown")
+                dep = o.get("departure_date", "")
+                ret = o.get("return_date", "")
+                stops = o.get("outbound_stops", "?")
+                lines.append(f"{i}. {emoji} <b>${price:,.0f}</b> — {airline}")
+                lines.append(f"   {dep} → {ret} • {stops} stop{'s' if stops != 1 else ''}")
+        else:
+            lines.append("No eligible offers in last scan.")
+
+        return "\n".join(lines)
+
     return None
+
+
+async def poll_commands():
+    """Poll Telegram for incoming commands and respond."""
+    global _update_offset
+
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return
+
+    url = TELEGRAM_API.format(token=TELEGRAM_BOT_TOKEN, method="getUpdates")
+    params = {"offset": _update_offset, "timeout": 1, "limit": 10}
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(url, params=params)
+            data = resp.json()
+
+        if not data.get("ok"):
+            return
+
+        for update in data.get("result", []):
+            _update_offset = update["update_id"] + 1
+            msg = update.get("message", {})
+            text = msg.get("text", "")
+            chat_id = str(msg.get("chat", {}).get("id", ""))
+
+            if chat_id != str(TELEGRAM_CHAT_ID):
+                continue
+
+            if text.startswith("/"):
+                response = await handle_command(text)
+                if response:
+                    await send_message(response)
+
+    except Exception as e:
+        logger.debug("Poll error: %s", e)

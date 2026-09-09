@@ -223,6 +223,21 @@ async def run_test_provider(provider_name: str):
         await provider.close()
 
 
+async def _poll_telegram_loop(stop_event: asyncio.Event):
+    """Background task: poll Telegram for /status commands every 5 seconds."""
+    from notifications.telegram import poll_commands
+
+    while not stop_event.is_set():
+        try:
+            await poll_commands()
+        except Exception:
+            pass
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=5)
+        except asyncio.TimeoutError:
+            pass
+
+
 async def run_continuous():
     """Run the monitor continuously with scheduled checks."""
     init_db()
@@ -238,6 +253,7 @@ async def run_continuous():
     logger.info("Providers: %s", ", ".join(monitor.providers.keys()))
     logger.info("Passengers: %d, Cabin: %s", PASSENGERS, CABIN_CLASS)
     logger.info("Check interval: %dh (dynamic)", get_check_interval_hours())
+    logger.info("Telegram commands: /status, /help")
     logger.info("=" * 60)
 
     stop_event = asyncio.Event()
@@ -248,6 +264,8 @@ async def run_continuous():
 
     signal.signal(signal.SIGINT, _signal_handler)
     signal.signal(signal.SIGTERM, _signal_handler)
+
+    poll_task = asyncio.create_task(_poll_telegram_loop(stop_event))
 
     try:
         while not stop_event.is_set():
@@ -271,6 +289,8 @@ async def run_continuous():
                 pass
 
     finally:
+        stop_event.set()
+        poll_task.cancel()
         await monitor.close_all()
         logger.info("Monitor stopped")
 

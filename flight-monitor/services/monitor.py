@@ -37,6 +37,7 @@ from notifications.telegram import (
     send_historical_low_alert,
     send_price_drop_alert,
     send_scan_report,
+    store_last_scan,
 )
 from providers.base import BaseProvider, BaggageStatus, FlightOffer
 from services.baggage import evaluate_baggage, is_baggage_eligible
@@ -178,7 +179,8 @@ class FlightMonitor:
             "top_offers": top_offers,
         }
 
-        # Send scan status report to Telegram
+        # Store for /status command and send scan report to Telegram
+        store_last_scan(result)
         try:
             await send_scan_report(result)
         except Exception as e:
