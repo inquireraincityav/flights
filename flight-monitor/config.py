@@ -28,8 +28,8 @@ def _float(key: str, default: float) -> float:
 # --- Trip ---
 ORIGIN: str = os.getenv("ORIGIN", "YVR")
 DESTINATION: str = os.getenv("DESTINATION", "BOM")
-DEPARTURE_START: date = date.fromisoformat(os.getenv("DEPARTURE_START", "2026-12-11"))
-DEPARTURE_END: date = date.fromisoformat(os.getenv("DEPARTURE_END", "2026-12-15"))
+DEPARTURE_START: date = date.fromisoformat(os.getenv("DEPARTURE_START", "2026-12-05"))
+DEPARTURE_END: date = date.fromisoformat(os.getenv("DEPARTURE_END", "2026-12-10"))
 RETURN_START: date = date.fromisoformat(os.getenv("RETURN_START", "2027-01-03"))
 RETURN_END: date = date.fromisoformat(os.getenv("RETURN_END", "2027-01-05"))
 PASSENGERS: int = _int("PASSENGERS", 1)
