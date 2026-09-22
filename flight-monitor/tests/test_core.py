@@ -33,21 +33,20 @@ class TestDateGeneration:
         assert combos[0] == (date(2026, 12, 11), date(2027, 1, 3))
         assert combos[-1] == (date(2026, 12, 15), date(2027, 1, 5))
 
-    def test_exactly_18_combinations(self):
+    def test_exactly_20_combinations(self):
         from config import get_date_combinations
         combos = get_date_combinations()
-        assert len(combos) == 18
+        assert len(combos) == 20
 
     def test_all_departure_dates_present(self):
         from config import get_date_combinations
         combos = get_date_combinations()
         dep_dates = {c[0] for c in combos}
-        assert date(2026, 12, 5) in dep_dates
-        assert date(2026, 12, 6) in dep_dates
-        assert date(2026, 12, 7) in dep_dates
         assert date(2026, 12, 8) in dep_dates
         assert date(2026, 12, 9) in dep_dates
         assert date(2026, 12, 10) in dep_dates
+        assert date(2026, 12, 11) in dep_dates
+        assert date(2026, 12, 12) in dep_dates
 
     def test_all_return_dates_present(self):
         from config import get_date_combinations
@@ -56,6 +55,7 @@ class TestDateGeneration:
         assert date(2027, 1, 3) in ret_dates
         assert date(2027, 1, 4) in ret_dates
         assert date(2027, 1, 5) in ret_dates
+        assert date(2027, 1, 6) in ret_dates
 
     def test_format_duration(self):
         from utils.dates import format_duration
@@ -543,7 +543,7 @@ class TestConfig:
 
     def test_date_combinations_count(self):
         from config import get_date_combinations
-        assert len(get_date_combinations()) == 18
+        assert len(get_date_combinations()) == 20
 
     def test_scoring_weights_sum_to_one(self):
         from config import (
