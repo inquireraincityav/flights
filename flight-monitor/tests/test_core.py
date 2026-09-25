@@ -125,7 +125,7 @@ class TestBaggage:
             original_currency="CAD",
             cad_total=2000,
         )
-        offer = evaluate_baggage(offer)
+        offer = evaluate_baggage(offer, outbound_bags=1, inbound_bags=1)
         assert offer.baggage_status == "VERIFIED_INCLUDED"
         assert offer.checked_bags_included == 2
         assert offer.baggage_weight_kg == 23
@@ -143,13 +143,13 @@ class TestBaggage:
             original_currency="CAD",
             cad_total=2000,
         )
-        offer = evaluate_baggage(offer)
+        offer = evaluate_baggage(offer, outbound_bags=1, inbound_bags=1)
         assert offer.baggage_status == "VERIFIED_EXTRA_COST"
         assert offer.baggage_cost > 0
         assert is_baggage_eligible(offer) is True
 
     def test_baggage_fee_added_to_total(self):
-        """AC: $65/bag each way × 1 bag = $130 total."""
+        """AC: $65/bag each way x 1 bag = $130 total."""
         from providers.base import FlightOffer
         from services.baggage import evaluate_baggage
 
@@ -161,8 +161,27 @@ class TestBaggage:
             cad_total=1850,
             exchange_rate=1.0,
         )
-        offer = evaluate_baggage(offer)
-        assert offer.cad_total == 1850 + 130  # $65 × 2 legs
+        offer = evaluate_baggage(offer, outbound_bags=1, inbound_bags=1)
+        assert offer.cad_total == 1850 + 130  # $65 x 2 legs
+
+    def test_baggage_fee_direction_specific(self):
+        """AC: 1 bag outbound ($65) + 2 bags return ($130) = $195 total."""
+        from providers.base import FlightOffer
+        from services.baggage import evaluate_baggage
+
+        offer = FlightOffer(
+            airline="Air Canada",
+            total_price=1850,
+            total_with_baggage=1850,
+            original_currency="CAD",
+            cad_total=1850,
+            exchange_rate=1.0,
+        )
+        offer = evaluate_baggage(offer, outbound_bags=1, inbound_bags=2)
+        assert offer.outbound_baggage_cost == 65
+        assert offer.inbound_baggage_cost == 130
+        assert offer.baggage_cost == 195
+        assert offer.cad_total == 1850 + 195
 
     def test_cathay_bags_included(self):
         from providers.base import FlightOffer
@@ -175,10 +194,28 @@ class TestBaggage:
             original_currency="CAD",
             cad_total=2200,
         )
-        offer = evaluate_baggage(offer)
+        offer = evaluate_baggage(offer, outbound_bags=1, inbound_bags=1)
         assert offer.baggage_status == "VERIFIED_INCLUDED"
         assert offer.checked_bags_included == 1
         assert offer.baggage_cost == 0
+
+    def test_cathay_extra_return_bag(self):
+        """Cathay includes 1 bag; need 2 on return = 1 extra @ ~$65."""
+        from providers.base import FlightOffer
+        from services.baggage import evaluate_baggage
+
+        offer = FlightOffer(
+            airline="Cathay Pacific",
+            total_price=2200,
+            total_with_baggage=2200,
+            original_currency="CAD",
+            cad_total=2200,
+        )
+        offer = evaluate_baggage(offer, outbound_bags=1, inbound_bags=2)
+        assert offer.baggage_status == "VERIFIED_EXTRA_COST"
+        assert offer.outbound_baggage_cost == 0
+        assert offer.inbound_baggage_cost == 65
+        assert offer.baggage_cost == 65
 
     def test_unknown_airline_baggage(self):
         from providers.base import FlightOffer
@@ -632,7 +669,7 @@ class TestNewAirlineBaggage:
             airline="Emirates", total_price=2200,
             total_with_baggage=2200, original_currency="CAD", cad_total=2200,
         )
-        offer = evaluate_baggage(offer)
+        offer = evaluate_baggage(offer, outbound_bags=1, inbound_bags=1)
         assert offer.baggage_status == "VERIFIED_INCLUDED"
         assert offer.checked_bags_included == 1
         assert offer.baggage_weight_kg == 30
@@ -645,7 +682,7 @@ class TestNewAirlineBaggage:
             airline="Qatar Airways", total_price=2100,
             total_with_baggage=2100, original_currency="CAD", cad_total=2100,
         )
-        offer = evaluate_baggage(offer)
+        offer = evaluate_baggage(offer, outbound_bags=1, inbound_bags=1)
         assert offer.baggage_status == "VERIFIED_INCLUDED"
         assert offer.baggage_weight_kg == 30
 
@@ -657,7 +694,7 @@ class TestNewAirlineBaggage:
             airline="Turkish Airlines", total_price=2000,
             total_with_baggage=2000, original_currency="CAD", cad_total=2000,
         )
-        offer = evaluate_baggage(offer)
+        offer = evaluate_baggage(offer, outbound_bags=1, inbound_bags=1)
         assert offer.baggage_status == "VERIFIED_INCLUDED"
         assert offer.baggage_weight_kg == 30
 
@@ -669,7 +706,7 @@ class TestNewAirlineBaggage:
             airline="Lufthansa", total_price=2300,
             total_with_baggage=2300, original_currency="CAD", cad_total=2300,
         )
-        offer = evaluate_baggage(offer)
+        offer = evaluate_baggage(offer, outbound_bags=1, inbound_bags=1)
         assert offer.baggage_status == "VERIFIED_INCLUDED"
         assert offer.baggage_weight_kg == 23
 
@@ -681,9 +718,73 @@ class TestNewAirlineBaggage:
             airline="Singapore Airlines", total_price=2400,
             total_with_baggage=2400, original_currency="CAD", cad_total=2400,
         )
-        offer = evaluate_baggage(offer)
+        offer = evaluate_baggage(offer, outbound_bags=1, inbound_bags=1)
         assert offer.baggage_status == "VERIFIED_INCLUDED"
         assert offer.baggage_weight_kg == 30
+
+
+# --- Multi-Trip Configuration ---
+
+class TestMultiTrip:
+    def test_trip1_exists(self):
+        from config import TRIPS
+        assert len(TRIPS) >= 1
+        assert TRIPS[0].label == "Trip 1"
+
+    def test_trip1_passengers(self):
+        from config import TRIPS
+        assert TRIPS[0].passengers == 2
+
+    def test_trip1_date_combinations(self):
+        from config import TRIPS
+        combos = TRIPS[0].get_date_combinations()
+        assert len(combos) == 20  # 5 dep x 4 ret
+
+    def test_trip2_enabled(self):
+        from config import TRIPS
+        assert len(TRIPS) == 2
+        assert TRIPS[1].label == "Trip 2 (Family)"
+
+    def test_trip2_passengers(self):
+        from config import TRIPS
+        assert TRIPS[1].passengers == 2
+
+    def test_trip2_return_dates(self):
+        from config import TRIPS
+        trip2 = TRIPS[1]
+        assert trip2.return_start == date(2027, 1, 30)
+        assert trip2.return_end == date(2027, 2, 3)
+
+    def test_trip2_date_combinations(self):
+        from config import TRIPS
+        combos = TRIPS[1].get_date_combinations()
+        assert len(combos) == 25  # 5 dep x 5 ret
+
+    def test_trip2_notes(self):
+        from config import TRIPS
+        assert "infant" in TRIPS[1].notes.lower()
+
+    def test_all_date_combinations_total(self):
+        from config import get_all_date_combinations
+        total = get_all_date_combinations()
+        assert total == 45  # 20 + 25
+
+    def test_direction_specific_bags(self):
+        from config import OUTBOUND_BAGS_PER_PAX, INBOUND_BAGS_PER_PAX
+        assert OUTBOUND_BAGS_PER_PAX == 1
+        assert INBOUND_BAGS_PER_PAX == 2
+
+    def test_trip_config_bags(self):
+        from config import TRIPS
+        for trip in TRIPS:
+            assert trip.outbound_bags_per_pax == 1
+            assert trip.inbound_bags_per_pax == 2
+
+    def test_flight_offer_trip_fields(self):
+        from providers.base import FlightOffer
+        offer = FlightOffer(trip_label="Trip 1", trip_notes="test note")
+        assert offer.trip_label == "Trip 1"
+        assert offer.trip_notes == "test note"
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@ import httpx
 from config import (
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_CHAT_ID,
+    TRIPS,
     get_deal_emoji,
     get_deal_tier,
 )
@@ -99,13 +100,25 @@ async def send_test_alert() -> bool:
         "\U0001f4ca TREND: \U0001f4c9 Falling\n\n"
         "\U0001f3f7 <b>BOOKING SOURCE</b>: Cathay Pacific Direct\n"
         "⭐ <b>DEAL SCORE</b>: 94/100\n\n"
-        "\U0001f517 <a href=\"https://www.cathaypacific.com\">VIEW / BOOK</a>\n\n"
+        '\U0001f517 <a href="https://www.cathaypacific.com">VIEW / BOOK</a>\n\n'
         f"<i>Checked: {format_local(now_local())}</i>\n"
         "⚠️ <i>Fare availability and pricing can change until ticketing is completed.</i>\n\n"
         "ℹ️ <b>This is a TEST notification.</b>"
     )
     result = await send_message(text)
     return result is not None
+
+
+def _trip_tag(offer: dict) -> str:
+    """Build a short trip label tag for alerts."""
+    label = offer.get("trip_label", "")
+    notes = offer.get("trip_notes", "")
+    if not label:
+        return ""
+    tag = f"\U0001f3f7 <b>{label}</b>"
+    if notes:
+        tag += f" ({notes})"
+    return tag
 
 
 def _build_deal_alert(offer: dict, hist_low: float | None, prev_best: float | None) -> str:
@@ -161,8 +174,14 @@ def _build_deal_alert(offer: dict, hist_low: float | None, prev_best: float | No
     lines = [
         headline,
         f"{emoji} {tier_label}",
-        f"\U0001f4b0 <b>${price:,.0f} CAD</b> ROUND TRIP",
     ]
+
+    trip_tag = _trip_tag(offer)
+    if trip_tag:
+        lines.append(trip_tag)
+
+    lines.append(f"\U0001f4b0 <b>${price:,.0f} CAD</b> ROUND TRIP")
+
     if bag_line:
         lines.append(bag_line)
     if bag_weight:
@@ -243,9 +262,11 @@ async def send_price_drop_alert(
     new_price: float,
 ) -> Optional[str]:
     drop = old_price - new_price
+    trip_tag = _trip_tag(offer)
+    trip_line = f"\n{trip_tag}" if trip_tag else ""
     text = (
         f"<b>\U0001f4c9 MAJOR PRICE DROP</b>\n\n"
-        f"YVR → BOM\n"
+        f"YVR → BOM{trip_line}\n"
         f"{offer.get('departure_date', '')} → {offer.get('return_date', '')}\n"
         f"{offer.get('airline', 'Unknown')}\n\n"
         f"Previous: ${old_price:,.0f} CAD\n"
@@ -262,9 +283,11 @@ async def send_historical_low_alert(
     new_low: float,
 ) -> Optional[str]:
     savings = prev_low - new_low
+    trip_tag = _trip_tag(offer)
+    trip_line = f"\n{trip_tag}" if trip_tag else ""
     text = (
         f"<b>\U0001f3c6 NEW LOWEST PRICE</b>\n\n"
-        f"YVR → BOM\n"
+        f"YVR → BOM{trip_line}\n"
         f"{offer.get('departure_date', '')} → {offer.get('return_date', '')}\n"
         f"{offer.get('airline', 'Unknown')}\n\n"
         f"Previous low: ${prev_low:,.0f} CAD\n"
@@ -331,7 +354,7 @@ async def send_daily_summary(summary: dict) -> Optional[str]:
     if stats.get("historical_low"):
         lines.append(f"Historical low: ${stats['historical_low']:,.0f}")
     lines.append("")
-    lines.append(f"{stats.get('combinations_checked', 15)} date combinations checked")
+    lines.append(f"{stats.get('combinations_checked', 0)} date combinations checked")
     lines.append(f"{stats.get('providers_attempted', 0)} providers attempted")
     lines.append(f"{stats.get('providers_successful', 0)} providers successful")
     lines.append(f"{stats.get('eligible_itineraries', 0)} eligible itineraries analyzed")
@@ -383,41 +406,78 @@ async def send_scan_report(scan_result: dict) -> Optional[str]:
     fail_count = len(providers) - ok_count
 
     lines = [
-        "<b>\U0001f4e1 FLIGHT MONITOR — LIVE</b>",
+        "<b>\U0001f4e1 PEGASUS — LIVE</b>",
         f"<i>{now}</i>",
         "",
         f"\U0001f50d <b>Scan Complete</b> ({elapsed:.0f}s)",
         f"Providers: {ok_count} OK / {fail_count} failed",
         f"Results: {total} found, {eligible} eligible",
+        f"Trips: {len(TRIPS)}",
         "",
     ]
 
-    top_offers = scan_result.get("top_offers", [])
-    if top_offers:
-        lines.append("\U0001f3af <b>CLOSEST TO YOUR BUDGET</b>")
-        lines.append(f"Target: $1,800 — $2,600 CAD")
-        lines.append("")
-        for i, o in enumerate(top_offers[:5], 1):
-            price = o.get("cad_total", 0)
-            tier = get_deal_tier(price)
-            emoji = get_deal_emoji(tier)
-            airline = o.get("airline", "Unknown")
-            dep = o.get("departure_date", "")
-            ret = o.get("return_date", "")
-            stops = o.get("outbound_stops", "?")
-            bag = "\U0001f9f3" if o.get("baggage_status") in ("VERIFIED_INCLUDED", "VERIFIED_EXTRA_COST") else "❓"
-            score = o.get("deal_score", 0)
-            lines.append(
-                f"{i}. {emoji} <b>${price:,.0f}</b> — {airline}"
-            )
-            lines.append(
-                f"   {dep} → {ret} • {stops} stop{'s' if stops != 1 else ''} • {bag} • Score: {score:.0f}"
-            )
-        lines.append("")
+    # Show results grouped by trip
+    top_by_trip = scan_result.get("top_by_trip", {})
+    if top_by_trip:
+        for trip_label, trip_data in top_by_trip.items():
+            pax = trip_data.get("passengers", 0)
+            notes = trip_data.get("notes", "")
+            pax_info = f"{pax} pax"
+            if notes:
+                pax_info = notes
+
+            lines.append(f"\U0001f3af <b>{trip_label}</b> ({pax_info})")
+            lines.append(f"Target: $1,800 — $2,600 CAD")
+
+            offers = trip_data.get("offers", [])
+            if offers:
+                for i, o in enumerate(offers[:5], 1):
+                    price = o.get("cad_total", 0)
+                    tier = get_deal_tier(price)
+                    emoji = get_deal_emoji(tier)
+                    airline = o.get("airline", "Unknown")
+                    dep = o.get("departure_date", "")
+                    ret = o.get("return_date", "")
+                    stops = o.get("outbound_stops", "?")
+                    bag = "\U0001f9f3" if o.get("baggage_status") in ("VERIFIED_INCLUDED", "VERIFIED_EXTRA_COST") else "❓"
+                    score = o.get("deal_score", 0)
+                    lines.append(
+                        f"{i}. {emoji} <b>${price:,.0f}</b> — {airline}"
+                    )
+                    lines.append(
+                        f"   {dep} → {ret} • {stops} stop{'s' if stops != 1 else ''} • {bag} • Score: {score:.0f}"
+                    )
+            else:
+                lines.append("⚠️ No eligible offers for this trip.")
+            lines.append("")
     else:
-        lines.append("⚠️ No eligible offers found this scan.")
-        lines.append("Providers may be blocked or no results matched criteria.")
-        lines.append("")
+        # Fallback to flat top_offers
+        top_offers = scan_result.get("top_offers", [])
+        if top_offers:
+            lines.append("\U0001f3af <b>CLOSEST TO YOUR BUDGET</b>")
+            lines.append(f"Target: $1,800 — $2,600 CAD")
+            lines.append("")
+            for i, o in enumerate(top_offers[:5], 1):
+                price = o.get("cad_total", 0)
+                tier = get_deal_tier(price)
+                emoji = get_deal_emoji(tier)
+                airline = o.get("airline", "Unknown")
+                dep = o.get("departure_date", "")
+                ret = o.get("return_date", "")
+                stops = o.get("outbound_stops", "?")
+                bag = "\U0001f9f3" if o.get("baggage_status") in ("VERIFIED_INCLUDED", "VERIFIED_EXTRA_COST") else "❓"
+                score = o.get("deal_score", 0)
+                lines.append(
+                    f"{i}. {emoji} <b>${price:,.0f}</b> — {airline}"
+                )
+                lines.append(
+                    f"   {dep} → {ret} • {stops} stop{'s' if stops != 1 else ''} • {bag} • Score: {score:.0f}"
+                )
+            lines.append("")
+        else:
+            lines.append("⚠️ No eligible offers found this scan.")
+            lines.append("Providers may be blocked or no results matched criteria.")
+            lines.append("")
 
     # Provider status summary
     lines.append("<b>Provider Status</b>")
@@ -450,21 +510,21 @@ async def handle_command(command: str) -> Optional[str]:
 
     if cmd == "/help" or cmd == "/start":
         return (
-            "<b>Flight Monitor Commands</b>\n\n"
-            "/status — Is the monitor running? Last scan results\n"
+            "<b>Pegasus Flight Monitor</b>\n\n"
+            "/status — Last scan results for all trips\n"
             "/help — This message"
         )
 
     if cmd == "/status":
         if _last_scan_result is None:
             return (
-                "<b>\U0001f4e1 FLIGHT MONITOR</b>\n\n"
+                "<b>\U0001f4e1 PEGASUS</b>\n\n"
                 "No scan has completed yet.\n"
                 "The monitor is running — first results will appear after the initial scan finishes."
             )
 
         lines = [
-            "<b>\U0001f4e1 FLIGHT MONITOR — LIVE</b>",
+            "<b>\U0001f4e1 PEGASUS — LIVE</b>",
             f"<i>Last scan: {_last_scan_time}</i>",
             "",
         ]
@@ -480,20 +540,45 @@ async def handle_command(command: str) -> Optional[str]:
         lines.append(f"Scan time: {elapsed:.0f}s")
         lines.append("")
 
-        top_offers = _last_scan_result.get("top_offers", [])
-        if top_offers:
-            lines.append("\U0001f3af <b>TOP MATCHES</b>")
-            for i, o in enumerate(top_offers[:5], 1):
-                price = o.get("cad_total", 0)
-                emoji = get_deal_emoji(get_deal_tier(price))
-                airline = o.get("airline", "Unknown")
-                dep = o.get("departure_date", "")
-                ret = o.get("return_date", "")
-                stops = o.get("outbound_stops", "?")
-                lines.append(f"{i}. {emoji} <b>${price:,.0f}</b> — {airline}")
-                lines.append(f"   {dep} → {ret} • {stops} stop{'s' if stops != 1 else ''}")
+        # Show by trip
+        top_by_trip = _last_scan_result.get("top_by_trip", {})
+        if top_by_trip:
+            for trip_label, trip_data in top_by_trip.items():
+                notes = trip_data.get("notes", "")
+                pax = trip_data.get("passengers", 0)
+                pax_info = notes if notes else f"{pax} pax"
+                lines.append(f"\U0001f3af <b>{trip_label}</b> ({pax_info})")
+
+                offers = trip_data.get("offers", [])
+                if offers:
+                    for i, o in enumerate(offers[:3], 1):
+                        price = o.get("cad_total", 0)
+                        emoji = get_deal_emoji(get_deal_tier(price))
+                        airline = o.get("airline", "Unknown")
+                        dep = o.get("departure_date", "")
+                        ret = o.get("return_date", "")
+                        stops = o.get("outbound_stops", "?")
+                        lines.append(f"{i}. {emoji} <b>${price:,.0f}</b> — {airline}")
+                        lines.append(f"   {dep} → {ret} • {stops} stop{'s' if stops != 1 else ''}")
+                else:
+                    lines.append("No eligible offers.")
+                lines.append("")
         else:
-            lines.append("No eligible offers in last scan.")
+            # Fallback
+            top_offers = _last_scan_result.get("top_offers", [])
+            if top_offers:
+                lines.append("\U0001f3af <b>TOP MATCHES</b>")
+                for i, o in enumerate(top_offers[:5], 1):
+                    price = o.get("cad_total", 0)
+                    emoji = get_deal_emoji(get_deal_tier(price))
+                    airline = o.get("airline", "Unknown")
+                    dep = o.get("departure_date", "")
+                    ret = o.get("return_date", "")
+                    stops = o.get("outbound_stops", "?")
+                    lines.append(f"{i}. {emoji} <b>${price:,.0f}</b> — {airline}")
+                    lines.append(f"   {dep} → {ret} • {stops} stop{'s' if stops != 1 else ''}")
+            else:
+                lines.append("No eligible offers in last scan.")
 
         return "\n".join(lines)
 

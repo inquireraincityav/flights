@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import List, Tuple
@@ -32,8 +33,21 @@ DEPARTURE_START: date = date.fromisoformat(os.getenv("DEPARTURE_START", "2026-12
 DEPARTURE_END: date = date.fromisoformat(os.getenv("DEPARTURE_END", "2026-12-12"))
 RETURN_START: date = date.fromisoformat(os.getenv("RETURN_START", "2027-01-03"))
 RETURN_END: date = date.fromisoformat(os.getenv("RETURN_END", "2027-01-06"))
-PASSENGERS: int = _int("PASSENGERS", 1)
+PASSENGERS: int = _int("PASSENGERS", 2)
 CABIN_CLASS: str = os.getenv("CABIN_CLASS", "economy")
+
+# --- Baggage (direction-specific) ---
+OUTBOUND_BAGS_PER_PAX: int = _int("OUTBOUND_BAGS_PER_PAX", 1)
+INBOUND_BAGS_PER_PAX: int = _int("INBOUND_BAGS_PER_PAX", 2)
+CHECKED_BAGS_PER_PASSENGER: int = max(OUTBOUND_BAGS_PER_PAX, INBOUND_BAGS_PER_PAX)
+REQUIRE_CHECKED_BAG: bool = _bool(os.getenv("REQUIRE_CHECKED_BAG", "true"))
+
+# --- Trip 2 (Family) ---
+TRIP2_ENABLED: bool = _bool(os.getenv("TRIP2_ENABLED", "true"))
+TRIP2_PASSENGERS: int = _int("TRIP2_PASSENGERS", 2)
+TRIP2_RETURN_START: date = date.fromisoformat(os.getenv("TRIP2_RETURN_START", "2027-01-30"))
+TRIP2_RETURN_END: date = date.fromisoformat(os.getenv("TRIP2_RETURN_END", "2027-02-03"))
+TRIP2_NOTES: str = os.getenv("TRIP2_NOTES", "2 adults + 1 infant on lap")
 
 # --- Prices (CAD) ---
 MIN_TARGET_PRICE_CAD: float = _float("MIN_TARGET_PRICE_CAD", 1800)
@@ -48,10 +62,6 @@ PRICE_DROP_ALERT_CAD: float = _float("PRICE_DROP_ALERT_CAD", 150)
 SECONDARY_PRICE_DROP_ALERT_CAD: float = _float("SECONDARY_PRICE_DROP_ALERT_CAD", 50)
 CHECK_INTERVAL_HOURS: int = _int("CHECK_INTERVAL_HOURS", 4)
 ALERT_COOLDOWN_HOURS: int = _int("ALERT_COOLDOWN_HOURS", 24)
-
-# --- Baggage ---
-CHECKED_BAGS_PER_PASSENGER: int = _int("CHECKED_BAGS_PER_PASSENGER", 1)
-REQUIRE_CHECKED_BAG: bool = _bool(os.getenv("REQUIRE_CHECKED_BAG", "true"))
 
 # --- Itinerary ---
 MAX_STOPS: int = _int("MAX_STOPS", 3)
@@ -82,7 +92,6 @@ CURRENCY_API_URL: str = os.getenv(
 )
 
 # --- Deal Scoring Weights ---
-# Price-dominant: user prefers cheapest flights, comfortable with long layovers
 SCORE_WEIGHT_PRICE: float = _float("SCORE_WEIGHT_PRICE", 0.60)
 SCORE_WEIGHT_STOPS: float = _float("SCORE_WEIGHT_STOPS", 0.05)
 SCORE_WEIGHT_DURATION: float = _float("SCORE_WEIGHT_DURATION", 0.02)
@@ -111,17 +120,71 @@ LOG_DIR = BASE_DIR / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 
 
+@dataclass
+class TripConfig:
+    label: str
+    passengers: int
+    departure_start: date
+    departure_end: date
+    return_start: date
+    return_end: date
+    outbound_bags_per_pax: int
+    inbound_bags_per_pax: int
+    notes: str = ""
+
+    def get_date_combinations(self) -> List[Tuple[date, date]]:
+        combos = []
+        dep = self.departure_start
+        while dep <= self.departure_end:
+            ret = self.return_start
+            while ret <= self.return_end:
+                combos.append((dep, ret))
+                ret += timedelta(days=1)
+            dep += timedelta(days=1)
+        return combos
+
+
+def build_trips() -> List[TripConfig]:
+    trips = [
+        TripConfig(
+            label="Trip 1",
+            passengers=PASSENGERS,
+            departure_start=DEPARTURE_START,
+            departure_end=DEPARTURE_END,
+            return_start=RETURN_START,
+            return_end=RETURN_END,
+            outbound_bags_per_pax=OUTBOUND_BAGS_PER_PAX,
+            inbound_bags_per_pax=INBOUND_BAGS_PER_PAX,
+        ),
+    ]
+    if TRIP2_ENABLED:
+        trips.append(
+            TripConfig(
+                label="Trip 2 (Family)",
+                passengers=TRIP2_PASSENGERS,
+                departure_start=DEPARTURE_START,
+                departure_end=DEPARTURE_END,
+                return_start=TRIP2_RETURN_START,
+                return_end=TRIP2_RETURN_END,
+                outbound_bags_per_pax=OUTBOUND_BAGS_PER_PAX,
+                inbound_bags_per_pax=INBOUND_BAGS_PER_PAX,
+                notes=TRIP2_NOTES,
+            ),
+        )
+    return trips
+
+
+TRIPS: List[TripConfig] = build_trips()
+
+
 def get_date_combinations() -> List[Tuple[date, date]]:
-    """Generate all departure/return date combinations."""
-    combos = []
-    dep = DEPARTURE_START
-    while dep <= DEPARTURE_END:
-        ret = RETURN_START
-        while ret <= RETURN_END:
-            combos.append((dep, ret))
-            ret += timedelta(days=1)
-        dep += timedelta(days=1)
-    return combos
+    """Generate all departure/return date combinations for Trip 1."""
+    return TRIPS[0].get_date_combinations()
+
+
+def get_all_date_combinations() -> int:
+    """Total date combinations across all trips."""
+    return sum(len(t.get_date_combinations()) for t in TRIPS)
 
 
 def get_deal_tier(price_cad: float) -> str:

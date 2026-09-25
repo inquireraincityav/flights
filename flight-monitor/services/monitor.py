@@ -17,6 +17,8 @@ from config import (
     ORIGIN,
     PASSENGERS,
     REQUIRE_CHECKED_BAG,
+    TRIPS,
+    get_all_date_combinations,
     get_date_combinations,
     get_deal_tier,
 )
@@ -64,13 +66,16 @@ class FlightMonitor:
         logger.info("Registered provider: %s", provider.name)
 
     async def run_full_scan(self) -> dict:
-        """Execute a complete scan across all date combinations and providers."""
+        """Execute a complete scan across all trips, date combinations, and providers."""
         logger.info("=" * 60)
-        logger.info("Starting YVR → BOM full scan")
+        logger.info("Starting YVR → BOM full scan (%d trips)", len(TRIPS))
         logger.info("=" * 60)
 
-        combos = get_date_combinations()
-        logger.info("Scanning %d date combinations across %d providers", len(combos), len(self.providers))
+        total_combos = get_all_date_combinations()
+        logger.info(
+            "Scanning %d date combinations across %d providers (%d trips)",
+            total_combos, len(self.providers), len(TRIPS),
+        )
 
         all_offers: List[FlightOffer] = []
         provider_stats = {}
@@ -82,33 +87,40 @@ class FlightMonitor:
             provider_error = None
 
             try:
-                for dep_date, ret_date in combos:
-                    try:
-                        results = await provider.search_flights(
-                            origin=ORIGIN,
-                            destination=DESTINATION,
-                            departure_date=dep_date,
-                            return_date=ret_date,
-                            passengers=PASSENGERS,
-                            cabin=CABIN_CLASS,
-                        )
+                for trip in TRIPS:
+                    combos = trip.get_date_combinations()
+                    for dep_date, ret_date in combos:
+                        try:
+                            results = await provider.search_flights(
+                                origin=ORIGIN,
+                                destination=DESTINATION,
+                                departure_date=dep_date,
+                                return_date=ret_date,
+                                passengers=trip.passengers,
+                                cabin=CABIN_CLASS,
+                            )
 
-                        for offer in results:
-                            offer = evaluate_baggage(offer)
-                            offer = await verify_offer(offer)
-                            offer.deal_score = calculate_deal_score(offer)
-                            offer.deal_tier = get_deal_tier(offer.cad_total)
-                            provider_offers.append(offer)
+                            for offer in results:
+                                offer.trip_label = trip.label
+                                offer.trip_notes = trip.notes
+                                offer = evaluate_baggage(
+                                    offer,
+                                    outbound_bags=trip.outbound_bags_per_pax,
+                                    inbound_bags=trip.inbound_bags_per_pax,
+                                )
+                                offer = await verify_offer(offer)
+                                offer.deal_score = calculate_deal_score(offer)
+                                offer.deal_tier = get_deal_tier(offer.cad_total)
+                                provider_offers.append(offer)
 
-                        # Stagger between date combinations
-                        await asyncio.sleep(2)
+                            await asyncio.sleep(2)
 
-                    except Exception as e:
-                        logger.warning(
-                            "Provider %s failed for %s→%s: %s",
-                            provider_name, dep_date, ret_date, e,
-                        )
-                        continue
+                        except Exception as e:
+                            logger.warning(
+                                "Provider %s failed for %s %s→%s: %s",
+                                provider_name, trip.label, dep_date, ret_date, e,
+                            )
+                            continue
 
             except Exception as e:
                 provider_error = str(e)
@@ -124,7 +136,6 @@ class FlightMonitor:
                 "error": provider_error,
             }
 
-            # Record provider health
             with get_session() as session:
                 save_provider_health(session, {
                     "provider": provider_name,
@@ -141,7 +152,6 @@ class FlightMonitor:
                 provider_name, len(provider_offers), elapsed_ms, status,
             )
 
-            # Stagger between providers
             await asyncio.sleep(3)
 
         # Process results
@@ -151,17 +161,38 @@ class FlightMonitor:
             len(all_offers), len(eligible),
         )
 
-        # Save to database and check for alerts
         await self._save_and_alert(eligible)
 
         scan_elapsed = time.time() - scan_start
         logger.info("Full scan completed in %.1f seconds", scan_elapsed)
 
-        # Build top offers sorted by price for scan report
-        top_sorted = sorted(eligible, key=lambda o: o.cad_total)[:5]
-        top_offers = []
-        for o in top_sorted:
-            top_offers.append({
+        # Build top offers per trip for scan report
+        top_by_trip = {}
+        for trip in TRIPS:
+            trip_eligible = [o for o in eligible if o.trip_label == trip.label]
+            top_sorted = sorted(trip_eligible, key=lambda o: o.cad_total)[:5]
+            top_by_trip[trip.label] = {
+                "notes": trip.notes,
+                "passengers": trip.passengers,
+                "offers": [
+                    {
+                        "cad_total": o.cad_total,
+                        "airline": o.airline,
+                        "departure_date": o.departure_date,
+                        "return_date": o.return_date,
+                        "outbound_stops": o.outbound.stops if o.outbound else 0,
+                        "baggage_status": o.baggage_status,
+                        "deal_score": o.deal_score or 0,
+                        "trip_label": o.trip_label,
+                    }
+                    for o in top_sorted
+                ],
+            }
+
+        # Flat top_offers for backward compat
+        all_top = sorted(eligible, key=lambda o: o.cad_total)[:5]
+        top_offers = [
+            {
                 "cad_total": o.cad_total,
                 "airline": o.airline,
                 "departure_date": o.departure_date,
@@ -169,7 +200,10 @@ class FlightMonitor:
                 "outbound_stops": o.outbound.stops if o.outbound else 0,
                 "baggage_status": o.baggage_status,
                 "deal_score": o.deal_score or 0,
-            })
+                "trip_label": o.trip_label,
+            }
+            for o in all_top
+        ]
 
         result = {
             "total_offers": len(all_offers),
@@ -177,9 +211,9 @@ class FlightMonitor:
             "providers": provider_stats,
             "elapsed_seconds": round(scan_elapsed, 1),
             "top_offers": top_offers,
+            "top_by_trip": top_by_trip,
         }
 
-        # Store for /status command and send scan report to Telegram
         store_last_scan(result)
         try:
             await send_scan_report(result)
@@ -251,7 +285,6 @@ class FlightMonitor:
                     "verification_level": offer.verification_level,
                 })
 
-                # Check for alerts
                 await self._check_alerts(offer, fingerprint, session)
 
     async def _check_alerts(self, offer: FlightOffer, fingerprint: str, session):
@@ -266,6 +299,8 @@ class FlightMonitor:
         offer_dict["outbound_duration_minutes"] = offer.outbound.total_duration_minutes if offer.outbound else None
         offer_dict["return_duration_minutes"] = offer.inbound.total_duration_minutes if offer.inbound else None
         offer_dict["deal_score"] = offer.deal_score
+        offer_dict["trip_label"] = offer.trip_label
+        offer_dict["trip_notes"] = offer.trip_notes
 
         hist_low = get_historical_low(session, offer.departure_date, offer.return_date)
         prev_price = get_previous_price(session, offer.departure_date, offer.return_date)
@@ -295,9 +330,10 @@ class FlightMonitor:
                         "telegram_success": msg_id is not None,
                     })
                     logger.info(
-                        "%s %s DEAL: $%.0f %s %s→%s",
-                        get_deal_tier(price), "🔥" if tier == "INSANE" else "✓",
+                        "%s %s DEAL: $%.0f %s %s→%s [%s]",
+                        get_deal_tier(price), "\U0001f525" if tier == "INSANE" else "✓",
                         price, offer.airline, offer.departure_date, offer.return_date,
+                        offer.trip_label,
                     )
 
         # Price-drop alert
@@ -346,7 +382,6 @@ class FlightMonitor:
             from sqlalchemy import func
             from database.models import FlightOffer as FOModel, PriceHistory
 
-            # Today's cheapest
             today_offers = (
                 session.query(FOModel)
                 .filter(
@@ -365,11 +400,9 @@ class FlightMonitor:
             direct_offers = [o for o in today_offers if o.is_airline_direct]
             best_direct = direct_offers[0] if direct_offers else None
 
-            # By deal score
             scored = sorted(today_offers, key=lambda o: o.deal_score or 0, reverse=True)
             best_value = scored[0] if scored else None
 
-            # Fastest
             def _dur(o):
                 return (o.outbound_duration_minutes or 9999) + (o.return_duration_minutes or 9999)
             fastest = min(today_offers, key=_dur) if today_offers else None
@@ -402,7 +435,7 @@ class FlightMonitor:
                 "stats": {
                     "today_low": cheapest.cad_total if cheapest else None,
                     "historical_low": overall_low,
-                    "combinations_checked": 15,
+                    "combinations_checked": get_all_date_combinations(),
                     "providers_attempted": len(self.providers),
                     "eligible_itineraries": len(today_offers),
                 },

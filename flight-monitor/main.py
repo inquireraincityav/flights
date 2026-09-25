@@ -39,6 +39,8 @@ from config import (
     PASSENGERS,
     RETURN_START,
     RETURN_END,
+    TRIPS,
+    get_all_date_combinations,
     get_check_interval_hours,
     get_date_combinations,
 )
@@ -244,15 +246,25 @@ async def run_continuous():
     monitor = create_monitor()
 
     logger.info("=" * 60)
-    logger.info("Flight Price Monitor — YVR → BOM")
+    logger.info("PEGASUS — Flight Price Monitor — YVR → BOM")
     logger.info("=" * 60)
     logger.info("Origin: %s → Destination: %s", ORIGIN, DESTINATION)
-    logger.info("Departures: %s to %s", DEPARTURE_START, DEPARTURE_END)
-    logger.info("Returns: %s to %s", RETURN_START, RETURN_END)
-    logger.info("Date combinations: %d", len(get_date_combinations()))
+    for trip in TRIPS:
+        logger.info(
+            "  %s: %d pax, depart %s–%s, return %s–%s (%d combos)%s",
+            trip.label, trip.passengers,
+            trip.departure_start, trip.departure_end,
+            trip.return_start, trip.return_end,
+            len(trip.get_date_combinations()),
+            f" [{trip.notes}]" if trip.notes else "",
+        )
+        logger.info(
+            "    Bags: %d outbound / %d return per passenger",
+            trip.outbound_bags_per_pax, trip.inbound_bags_per_pax,
+        )
+    logger.info("Total date combinations: %d", get_all_date_combinations())
     logger.info("Providers: %s", ", ".join(monitor.providers.keys()))
-    logger.info("Passengers: %d, Cabin: %s", PASSENGERS, CABIN_CLASS)
-    logger.info("Check interval: %dh (dynamic)", get_check_interval_hours())
+    logger.info("Check interval: %dh", get_check_interval_hours())
     logger.info("Telegram commands: /status, /help")
     logger.info("=" * 60)
 

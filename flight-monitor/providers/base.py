@@ -129,6 +129,10 @@ class FlightOffer:
     deal_score: float = 0
     deal_tier: str = ""
 
+    # Multi-trip tracking
+    trip_label: str = ""
+    trip_notes: str = ""
+
     def to_db_dict(self, search_run_id: int, fingerprint: str) -> dict:
         import json
 
