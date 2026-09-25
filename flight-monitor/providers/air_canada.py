@@ -38,13 +38,10 @@ class AirCanadaProvider(BaseProvider):
     async def _ensure_browser(self):
         if self._browser is None:
             from playwright.async_api import async_playwright
-            from config import HEADLESS
+            from utils.browser import get_launch_kwargs
 
             self._playwright = await async_playwright().start()
-            self._browser = await self._playwright.chromium.launch(
-                headless=HEADLESS,
-                args=["--disable-blink-features=AutomationControlled"],
-            )
+            self._browser = await self._playwright.chromium.launch(**get_launch_kwargs())
             self._context = await self._browser.new_context(
                 viewport={"width": 1366, "height": 768},
                 locale="en-CA",
