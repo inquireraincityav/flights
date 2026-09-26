@@ -495,6 +495,7 @@ async def send_scan_report(scan_result: dict) -> Optional[str]:
 _last_scan_result: Optional[dict] = None
 _last_scan_time: Optional[str] = None
 _update_offset: int = 0
+_scan_event: Optional[asyncio.Event] = None
 
 
 def store_last_scan(scan_result: dict):
@@ -502,6 +503,45 @@ def store_last_scan(scan_result: dict):
     global _last_scan_result, _last_scan_time
     _last_scan_result = scan_result
     _last_scan_time = format_local(now_local())
+
+
+def register_scan_event(event: asyncio.Event):
+    """Register an asyncio.Event that /scan can set to trigger an immediate scan."""
+    global _scan_event
+    _scan_event = event
+
+
+def _no_scan_yet() -> str:
+    return (
+        "<b>\U0001f4e1 PEGASUS</b>\n\n"
+        "No scan has completed yet.\n"
+        "The monitor is running — first results will appear after the initial scan finishes."
+    )
+
+
+def _format_trip_offers(trip_label: str, trip_data: dict, limit: int = 5) -> List[str]:
+    """Format a trip's offers into message lines."""
+    notes = trip_data.get("notes", "")
+    pax = trip_data.get("passengers", 0)
+    pax_info = notes if notes else f"{pax} pax"
+    lines = [f"\U0001f3af <b>{trip_label}</b> ({pax_info})"]
+
+    offers = trip_data.get("offers", [])
+    if offers:
+        for i, o in enumerate(offers[:limit], 1):
+            price = o.get("cad_total", 0)
+            emoji = get_deal_emoji(get_deal_tier(price))
+            airline = o.get("airline", "Unknown")
+            dep = o.get("departure_date", "")
+            ret = o.get("return_date", "")
+            stops = o.get("outbound_stops", "?")
+            bag = o.get("baggage_status", "")
+            bag_icon = "\U0001f9f3" if bag in ("VERIFIED_INCLUDED", "VERIFIED_EXTRA_COST") else ""
+            lines.append(f"{i}. {emoji} <b>${price:,.0f}</b> — {airline}")
+            lines.append(f"   {dep} → {ret} • {stops} stop{'s' if stops != 1 else ''} {bag_icon}")
+    else:
+        lines.append("No eligible offers.")
+    return lines
 
 
 async def handle_command(command: str) -> Optional[str]:
@@ -512,16 +552,18 @@ async def handle_command(command: str) -> Optional[str]:
         return (
             "<b>Pegasus Flight Monitor</b>\n\n"
             "/status — Last scan results for all trips\n"
+            "/cheapest — Single cheapest offer found\n"
+            "/trip1 — Best prices for Trip 1\n"
+            "/trip2 — Best prices for Trip 2 (Family)\n"
+            "/airlines — Best price by airline\n"
+            "/history — Price trend over recent scans\n"
+            "/scan — Trigger an immediate scan\n"
             "/help — This message"
         )
 
     if cmd == "/status":
         if _last_scan_result is None:
-            return (
-                "<b>\U0001f4e1 PEGASUS</b>\n\n"
-                "No scan has completed yet.\n"
-                "The monitor is running — first results will appear after the initial scan finishes."
-            )
+            return _no_scan_yet()
 
         lines = [
             "<b>\U0001f4e1 PEGASUS — LIVE</b>",
@@ -540,31 +582,12 @@ async def handle_command(command: str) -> Optional[str]:
         lines.append(f"Scan time: {elapsed:.0f}s")
         lines.append("")
 
-        # Show by trip
         top_by_trip = _last_scan_result.get("top_by_trip", {})
         if top_by_trip:
             for trip_label, trip_data in top_by_trip.items():
-                notes = trip_data.get("notes", "")
-                pax = trip_data.get("passengers", 0)
-                pax_info = notes if notes else f"{pax} pax"
-                lines.append(f"\U0001f3af <b>{trip_label}</b> ({pax_info})")
-
-                offers = trip_data.get("offers", [])
-                if offers:
-                    for i, o in enumerate(offers[:3], 1):
-                        price = o.get("cad_total", 0)
-                        emoji = get_deal_emoji(get_deal_tier(price))
-                        airline = o.get("airline", "Unknown")
-                        dep = o.get("departure_date", "")
-                        ret = o.get("return_date", "")
-                        stops = o.get("outbound_stops", "?")
-                        lines.append(f"{i}. {emoji} <b>${price:,.0f}</b> — {airline}")
-                        lines.append(f"   {dep} → {ret} • {stops} stop{'s' if stops != 1 else ''}")
-                else:
-                    lines.append("No eligible offers.")
+                lines.extend(_format_trip_offers(trip_label, trip_data, limit=3))
                 lines.append("")
         else:
-            # Fallback
             top_offers = _last_scan_result.get("top_offers", [])
             if top_offers:
                 lines.append("\U0001f3af <b>TOP MATCHES</b>")
@@ -572,15 +595,170 @@ async def handle_command(command: str) -> Optional[str]:
                     price = o.get("cad_total", 0)
                     emoji = get_deal_emoji(get_deal_tier(price))
                     airline = o.get("airline", "Unknown")
-                    dep = o.get("departure_date", "")
-                    ret = o.get("return_date", "")
-                    stops = o.get("outbound_stops", "?")
                     lines.append(f"{i}. {emoji} <b>${price:,.0f}</b> — {airline}")
-                    lines.append(f"   {dep} → {ret} • {stops} stop{'s' if stops != 1 else ''}")
             else:
                 lines.append("No eligible offers in last scan.")
 
         return "\n".join(lines)
+
+    if cmd == "/cheapest":
+        if _last_scan_result is None:
+            return _no_scan_yet()
+
+        top_by_trip = _last_scan_result.get("top_by_trip", {})
+        cheapest = None
+        cheapest_trip = ""
+        for trip_label, trip_data in top_by_trip.items():
+            for o in trip_data.get("offers", []):
+                if cheapest is None or o.get("cad_total", 9999999) < cheapest.get("cad_total", 9999999):
+                    cheapest = o
+                    cheapest_trip = trip_label
+
+        if not cheapest:
+            all_top = _last_scan_result.get("top_offers", [])
+            if all_top:
+                cheapest = all_top[0]
+
+        if not cheapest:
+            return "<b>\U0001f4e1 PEGASUS</b>\n\nNo eligible offers found in the last scan."
+
+        price = cheapest.get("cad_total", 0)
+        tier = get_deal_tier(price)
+        emoji = get_deal_emoji(tier)
+        lines = [
+            f"<b>\U0001f451 CHEAPEST OFFER</b>",
+            "",
+            f"{emoji} <b>${price:,.0f} CAD</b> — {tier}",
+            f"✈️ {cheapest.get('airline', 'Unknown')}",
+            f"\U0001f4c5 {cheapest.get('departure_date', '')} → {cheapest.get('return_date', '')}",
+            f"{cheapest.get('outbound_stops', '?')} stop{'s' if cheapest.get('outbound_stops', 0) != 1 else ''}",
+        ]
+        if cheapest_trip:
+            lines.append(f"\U0001f3f7 {cheapest_trip}")
+        lines.append("")
+        lines.append(f"<i>From scan at {_last_scan_time}</i>")
+        return "\n".join(lines)
+
+    if cmd in ("/trip1", "/trip2"):
+        if _last_scan_result is None:
+            return _no_scan_yet()
+
+        trip_num = cmd[-1]
+        top_by_trip = _last_scan_result.get("top_by_trip", {})
+
+        target_label = None
+        target_data = None
+        for trip_label, trip_data in top_by_trip.items():
+            if f"Trip {trip_num}" in trip_label:
+                target_label = trip_label
+                target_data = trip_data
+                break
+
+        if target_data is None:
+            if trip_num == "2":
+                return "<b>\U0001f4e1 PEGASUS</b>\n\nTrip 2 is not enabled. Set TRIP2_ENABLED=true in .env to add it."
+            return f"<b>\U0001f4e1 PEGASUS</b>\n\nNo data for Trip {trip_num}."
+
+        lines = [
+            f"<b>\U0001f4e1 PEGASUS — {target_label.upper()}</b>",
+            f"<i>Last scan: {_last_scan_time}</i>",
+            "",
+        ]
+        lines.extend(_format_trip_offers(target_label, target_data, limit=5))
+        return "\n".join(lines)
+
+    if cmd == "/airlines":
+        if _last_scan_result is None:
+            return _no_scan_yet()
+
+        airline_best: Dict[str, dict] = {}
+        top_by_trip = _last_scan_result.get("top_by_trip", {})
+        all_offers = []
+        for trip_data in top_by_trip.values():
+            all_offers.extend(trip_data.get("offers", []))
+        if not all_offers:
+            all_offers = _last_scan_result.get("top_offers", [])
+
+        for o in all_offers:
+            airline = o.get("airline", "Unknown")
+            price = o.get("cad_total", 9999999)
+            if airline not in airline_best or price < airline_best[airline]["cad_total"]:
+                airline_best[airline] = o
+
+        if not airline_best:
+            return "<b>\U0001f4e1 PEGASUS</b>\n\nNo airline data from the last scan."
+
+        sorted_airlines = sorted(airline_best.items(), key=lambda x: x[1].get("cad_total", 9999999))
+
+        lines = [
+            "<b>✈️ BEST PRICE BY AIRLINE</b>",
+            f"<i>Last scan: {_last_scan_time}</i>",
+            "",
+        ]
+        for airline, o in sorted_airlines:
+            price = o.get("cad_total", 0)
+            emoji = get_deal_emoji(get_deal_tier(price))
+            stops = o.get("outbound_stops", "?")
+            lines.append(f"{emoji} <b>${price:,.0f}</b> — {airline} ({stops} stop{'s' if stops != 1 else ''})")
+
+        return "\n".join(lines)
+
+    if cmd == "/history":
+        try:
+            from database.database import get_session as get_db_session
+            from database.models import PriceHistory
+            from sqlalchemy import func
+
+            with get_db_session() as session:
+                rows = (
+                    session.query(
+                        func.date(PriceHistory.recorded_at).label("day"),
+                        func.min(PriceHistory.lowest_price_cad).label("low"),
+                    )
+                    .filter(PriceHistory.is_baggage_inclusive == True)
+                    .group_by(func.date(PriceHistory.recorded_at))
+                    .order_by(func.date(PriceHistory.recorded_at).desc())
+                    .limit(7)
+                    .all()
+                )
+
+            if not rows:
+                return "<b>\U0001f4e1 PEGASUS</b>\n\nNo price history yet. Trends will appear after a few scans."
+
+            lines = [
+                "<b>\U0001f4ca PRICE HISTORY</b>",
+                "<i>Lowest baggage-inclusive price per day</i>",
+                "",
+            ]
+
+            rows_asc = list(reversed(rows))
+            for r in rows_asc:
+                day_str = r.day if isinstance(r.day, str) else str(r.day)
+                price = r.low
+                emoji = get_deal_emoji(get_deal_tier(price))
+                lines.append(f"{day_str}  {emoji} <b>${price:,.0f}</b>")
+
+            if len(rows_asc) >= 2:
+                first_price = rows_asc[0].low
+                last_price = rows_asc[-1].low
+                change = last_price - first_price
+                if change < -50:
+                    lines.append(f"\n\U0001f4c9 <b>Trending down</b> (${abs(change):,.0f} drop)")
+                elif change > 50:
+                    lines.append(f"\n\U0001f4c8 <b>Trending up</b> (+${change:,.0f})")
+                else:
+                    lines.append(f"\n➡️ <b>Stable</b>")
+
+            return "\n".join(lines)
+        except Exception as e:
+            logger.warning("History command failed: %s", e)
+            return "<b>\U0001f4e1 PEGASUS</b>\n\nCouldn't load price history."
+
+    if cmd == "/scan":
+        if _scan_event is not None:
+            _scan_event.set()
+            return "\U0001f504 <b>Scan triggered!</b>\n\nRunning now — results will be posted when complete."
+        return "\U0001f504 <b>Scan requested</b>\n\nThe monitor will pick this up on its next cycle."
 
     return None
 

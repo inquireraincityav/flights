@@ -265,10 +265,14 @@ async def run_continuous():
     logger.info("Total date combinations: %d", get_all_date_combinations())
     logger.info("Providers: %s", ", ".join(monitor.providers.keys()))
     logger.info("Check interval: %dh", get_check_interval_hours())
-    logger.info("Telegram commands: /status, /help")
+    logger.info("Telegram: /status /cheapest /trip1 /trip2 /airlines /history /scan /help")
     logger.info("=" * 60)
 
     stop_event = asyncio.Event()
+    scan_now_event = asyncio.Event()
+
+    from notifications.telegram import register_scan_event
+    register_scan_event(scan_now_event)
 
     def _signal_handler(sig, frame):
         logger.info("Shutdown signal received")
@@ -290,15 +294,24 @@ async def run_continuous():
             except Exception as e:
                 logger.error("Scan failed: %s", e)
 
+            scan_now_event.clear()
             interval_hours = get_check_interval_hours()
             interval_seconds = interval_hours * 3600
-            next_check = datetime.now().strftime("%H:%M")
-            logger.info("Next scan in %d hours", interval_hours)
+            logger.info("Next scan in %d hours (or send /scan)", interval_hours)
 
-            try:
-                await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
-            except asyncio.TimeoutError:
-                pass
+            done, pending = await asyncio.wait(
+                [
+                    asyncio.create_task(stop_event.wait()),
+                    asyncio.create_task(scan_now_event.wait()),
+                    asyncio.create_task(asyncio.sleep(interval_seconds)),
+                ],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in pending:
+                task.cancel()
+
+            if scan_now_event.is_set():
+                logger.info("Manual scan triggered via /scan")
 
     finally:
         stop_event.set()
